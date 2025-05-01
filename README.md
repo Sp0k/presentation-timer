@@ -23,7 +23,7 @@ Built using [tview](https://github.com/rivo/tview) and [tcell](https://github.co
 ### Go
 
 ```
-go install github.com/Sp0k/presentation-timer
+go install github.com/Sp0k/presentation-timer@latest
 ```
 
 ### From source
