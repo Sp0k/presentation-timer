@@ -18,6 +18,28 @@ Built using [tview](https://github.com/rivo/tview) and [tcell](https://github.co
 
 ---
 
+## 🛠️ Installation
+
+### Go
+
+```
+go install github.com/Sp0k/presentation-timer
+```
+
+### From source
+
+```
+git clone https://github.com/Sp0k/presentation-timer
+cd presentation-timer
+go install
+```
+
+### Binary
+
+You can also download a binary from the [release](https://github.com/Sp0k/presentation-timer/releases)
+
+---
+
 ## 🧑‍💻 Usage
 
 ### 1. Run the app
@@ -62,6 +84,8 @@ go run main.go app.go models.go
 > [!WARNING]
 > This data is not saved anywhere. You must manually record it if needed
 
+---
+
 ## 📦 Dependencies
 
 - [Go](https://go.dev/) 1.18+
@@ -74,6 +98,8 @@ Install them with:
 go get github.com/rivo/tview
 go get github.com/gdamore/tcell/v2
 ```
+
+---
 
 ## 📁 Project Structure
 
