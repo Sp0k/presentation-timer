@@ -22,4 +22,5 @@ type Presentation struct {
 	CurrentSectionIndex int
 	StartTime           int64
 	Running             bool
+	PausedTimeMs        TotalTimeMs
 }

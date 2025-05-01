@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"strconv"
@@ -22,6 +23,8 @@ var (
 	outputHeader string
 	outputBody   string
 	outputFooter string
+
+	paused bool
 )
 
 func InitApp() {
@@ -32,6 +35,8 @@ func InitApp() {
 	if err := app.SetRoot(inputForm, true).Run(); err != nil {
 		panic(err)
 	}
+
+	paused = false
 }
 
 func buildInputForm() *tview.Form {
@@ -92,7 +97,7 @@ func buildTimerScreen() {
 	timerText.SetTextAlign(tview.AlignCenter)
 	timerText.SetDynamicColors(true)
 	timerText.SetBorder(true)
-	timerText.SetTitle("Presentation Timer")
+	timerText.SetTitle(" Presentation Timer ")
 
 	layout := tview.NewFlex().
 		SetDirection(tview.FlexRow).
@@ -101,8 +106,34 @@ func buildTimerScreen() {
 	app.SetRoot(layout, true)
 
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyRune && event.Rune() == ' ' {
-			handleSpacebarSwitch()
+		if event.Key() == tcell.KeyRune {
+			switch event.Rune() {
+			case ' ':
+				if !presentation.Running && !paused {
+					app.Stop()
+					return nil
+				}
+				handleSpacebarSwitch()
+			case 'p':
+				if presentation.Running {
+					saveTime()
+					presentation.Running = false
+					paused = true
+					presentation.PausedTimeMs = TotalTimeMs(time.Now().UnixMilli())
+				} else {
+					resumeTime := time.Now().UnixMilli()
+					presentation.StartTime += (resumeTime - int64(presentation.PausedTimeMs))
+					lastTimeChange = resumeTime
+					presentation.Running = true
+					paused = false
+				}
+			case 'n':
+				saveTime()
+				presentation.CurrentSpeakerIndex = (presentation.CurrentSpeakerIndex + 1) % len(presentation.Speakers)
+			case 'N':
+				saveTime()
+				presentation.CurrentSpeakerIndex = (presentation.CurrentSpeakerIndex - 1) % len(presentation.Speakers)
+			}
 			return nil
 		}
 		return event
@@ -144,9 +175,19 @@ func updateClockTimer() {
 			})
 			finalTime = time.Now().UnixMilli() - presentation.StartTime
 		} else {
-			app.QueueUpdateDraw(func() {
-				timerText.SetText(outputHeader + outputBody + outputFooter)
-			})
+			if paused {
+				elapsedMS := int64(presentation.PausedTimeMs) - presentation.StartTime
+				elapsed := time.Duration(elapsedMS) * time.Millisecond
+				app.QueueUpdateDraw(func() {
+					timerText.SetText(
+						"\n\n\n[red]PAUSED\n[yellow]Total:[white] " + formatDuration(elapsed),
+					)
+				})
+			} else {
+				app.QueueUpdateDraw(func() {
+					timerText.SetText(outputHeader + outputBody + outputFooter)
+				})
+			}
 		}
 	}
 }
@@ -184,7 +225,7 @@ func saveTime() {
 	currSpeaker := presentation.Speakers[presentation.CurrentSpeakerIndex].Name
 	currSection := &presentation.Sections[presentation.CurrentSectionIndex]
 
-	currSection.SpeakerSplits[currSpeaker] = TotalTimeMs(timeAdded)
+	currSection.SpeakerSplits[currSpeaker] += TotalTimeMs(timeAdded)
 	currSection.TotalTimeMs += TotalTimeMs(timeAdded)
 	presentation.TotalSpeakerSplits[currSpeaker] += TotalTimeMs(timeAdded)
 
@@ -196,26 +237,34 @@ func calculateOutput() {
 
 	totalTime := time.Duration(finalTime) * time.Millisecond
 	var body strings.Builder
+	var txtFileOutput strings.Builder
 
 	// Total time
 	body.WriteString("\n[yellow]Total time:[white] " + formatDuration(totalTime) + "\n")
+	txtFileOutput.WriteString("Total time: " + formatDuration(totalTime) + "\n")
 
 	// Speaker split
 	body.WriteString("\n[yellow]Total time per speaker:\n")
+	txtFileOutput.WriteString("\nTotal time per speaker:\n")
 	for name, total := range presentation.TotalSpeakerSplits {
 		body.WriteString("[orange]" + string(name) + ":[white] " + formatDuration(time.Duration(total)*time.Millisecond) + "\n")
+		txtFileOutput.WriteString("\t" + string(name) + ": " + formatDuration(time.Duration(total)*time.Millisecond) + "\n")
 	}
 
 	// Section split
 	body.WriteString("\n[yellow]Time per section:\n")
+	txtFileOutput.WriteString("\nTime per section:\n")
 	for _, section := range presentation.Sections {
 		body.WriteString("[purple]" + string(section.Name) + " [white](" + formatDuration(time.Duration(section.TotalTimeMs)*time.Millisecond) + ")[purple]:\n")
+		txtFileOutput.WriteString("\t" + string(section.Name) + " (" + formatDuration(time.Duration(section.TotalTimeMs)*time.Millisecond) + "):\n")
 		for name, total := range section.SpeakerSplits {
 			body.WriteString("\t[orange]" + string(name) + ":[white] " + formatDuration(time.Duration(total)*time.Millisecond) + "\n")
+			txtFileOutput.WriteString("\t\t" + string(name) + ": " + formatDuration(time.Duration(total)*time.Millisecond) + "\n")
 		}
 	}
 
 	outputBody = body.String()
+	savedPath := SavePresentationData(txtFileOutput.String())
 
-	outputFooter = "\n[green]Press ctrl+c to exit\n(this data will not be saved anywhere)"
+	outputFooter = fmt.Sprintf("\n[green]Press ctrl+c to exit\nYour data was saved at: " + savedPath)
 }
