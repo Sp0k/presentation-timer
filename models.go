@@ -11,12 +11,14 @@ type Speaker struct {
 type Section struct {
 	Name
 	TotalTimeMs
+	AssignedSpeakers []Name
 	SpeakerSplits map[Name]TotalTimeMs
 }
 
 type Presentation struct {
 	Speakers            []Speaker
 	Sections            []Section
+	AssignedSections		bool
 	TotalSpeakerSplits  map[Name]TotalTimeMs
 	CurrentSpeakerIndex int
 	CurrentSectionIndex int

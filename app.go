@@ -48,12 +48,18 @@ func buildInputForm() *tview.Form {
 		SetLabel("Sections (comma separated): ").
 		SetFieldWidth(40)
 
+	assignmentCheckbox := tview.NewCheckbox().
+		SetLabel("Assign speakers per section: ").
+		SetChecked(false)
+
 	form := tview.NewForm().
 		AddFormItem(speakersInput).
 		AddFormItem(sectionsInput).
+		AddFormItem(assignmentCheckbox).
 		AddButton("Start Presentation", func() {
 			speakerNames := parseInput(speakersInput.GetText())
 			sectionNames := parseInput(sectionsInput.GetText())
+			assignSections := assignmentCheckbox.IsChecked()
 
 			var speakers []Speaker
 			for _, name := range speakerNames {
@@ -73,6 +79,7 @@ func buildInputForm() *tview.Form {
 			presentation = Presentation{
 				Speakers:            speakers,
 				Sections:            sections,
+				AssignedSections: 	 assignSections,
 				TotalSpeakerSplits:  totalSpeakerSplits,
 				CurrentSpeakerIndex: 0,
 				CurrentSectionIndex: 0,
@@ -82,7 +89,17 @@ func buildInputForm() *tview.Form {
 
 			lastTimeChange = time.Now().UnixMilli()
 
-			buildTimerScreen()
+			if presentation.AssignedSections {
+				buildAssignmentScreen()
+			} else {
+				for i := range presentation.Sections {
+					for _, speaker := range presentation.Speakers {
+						presentation.Sections[i].AssignedSpeakers =
+							append(presentation.Sections[i].AssignedSpeakers, speaker.Name)
+					}
+				}
+				startPresentation()
+			}
 		})
 
 	form.SetBorder(true).
@@ -90,6 +107,86 @@ func buildInputForm() *tview.Form {
 		SetTitleAlign(tview.AlignLeft)
 
 	return form
+}
+
+func buildAssignmentScreen() {
+	form := tview.NewForm()
+
+	checkboxes := make([][]*tview.Checkbox, len(presentation.Sections))
+
+	for i, section := range presentation.Sections {
+		form.AddTextView(
+			fmt.Sprintf("section-label-%d", i),
+			fmt.Sprintf("Section: %s", section.Name),
+			40,
+			1,
+			false,
+			false,
+		)
+
+		checkboxes[i] = make([]*tview.Checkbox, len(presentation.Speakers))
+
+		for j, speaker := range presentation.Speakers {
+			cb := tview.NewCheckbox().
+				SetLabel("  " + string(speaker.Name)).
+				SetChecked(false)
+
+			checkboxes[i][j] = cb
+			form.AddFormItem(cb)
+		}
+	}
+
+	form.AddButton("Start Timer", func() {
+		for i := range presentation.Sections {
+			presentation.Sections[i].AssignedSpeakers = nil
+
+			for j, speaker := range presentation.Speakers {
+				if checkboxes[i][j].IsChecked() {
+					presentation.Sections[i].AssignedSpeakers =
+						append(presentation.Sections[i].AssignedSpeakers, speaker.Name)
+				}
+			}
+
+			if len(presentation.Sections[i].AssignedSpeakers) == 0 {
+				showAssignmentError("Each section must have at least one assigned speaker.")
+				return
+			}
+		}
+
+		startPresentation()
+	})
+
+	form.AddButton("Back", func() {
+		app.SetRoot(buildInputForm(), true)
+	})
+
+	form.SetBorder(true).
+		SetTitle("Assign Speakers to Sections").
+		SetTitleAlign(tview.AlignLeft)
+
+	app.SetRoot(form, true)
+}
+
+func showAssignmentError(msg string) {
+	modal := tview.NewModal().
+		SetText(msg).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			buildAssignmentScreen()
+		})
+
+	app.SetRoot(modal, true)
+}
+
+func startPresentation() {
+	presentation.CurrentSpeakerIndex = 0
+	presentation.CurrentSectionIndex = 0
+	presentation.StartTime = time.Now().UnixMilli()
+	presentation.Running = true
+	lastTimeChange = presentation.StartTime
+	paused = false
+
+	buildTimerScreen()
 }
 
 func buildTimerScreen() {
@@ -154,6 +251,24 @@ func parseInput(input string) []string {
 	return results
 }
 
+func currentSectionSpeakers() []Name {
+	if presentation.CurrentSectionIndex >= len(presentation.Sections) {
+		return nil
+	}
+	return presentation.Sections[presentation.CurrentSectionIndex].AssignedSpeakers
+}
+
+func currentSpeakerName() Name {
+	speakers := currentSectionSpeakers()
+	if len(speakers) == 0 {
+		return ""
+	}
+	if presentation.CurrentSpeakerIndex >= len(speakers) {
+		presentation.CurrentSpeakerIndex = 0
+	}
+	return speakers[presentation.CurrentSpeakerIndex]
+}
+
 func updateClockTimer() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -163,15 +278,15 @@ func updateClockTimer() {
 			elapsedMs := time.Now().UnixMilli() - presentation.StartTime
 			elapsed := time.Duration(elapsedMs) * time.Millisecond
 
-			currentSpeaker := presentation.Speakers[presentation.CurrentSpeakerIndex].Name
+			currentSpeaker := currentSpeakerName()
 			currentSection := presentation.Sections[presentation.CurrentSectionIndex].Name
 
 			app.QueueUpdateDraw(func() {
 				timerText.SetText(
 					"\n\n\n[yellow]Section:[white] " + string(currentSection) + "\n" +
-						"[yellow]Speaker:[white] " + string(currentSpeaker) + "\n" +
-						"[yellow]Elapsed:[white] " + formatDuration(elapsed),
-				)
+					"[yellow]Speaker:[white] " + string(currentSpeaker) + "\n" +
+					"[yellow]Elapsed:[white] " + formatDuration(elapsed),
+					)
 			})
 			finalTime = time.Now().UnixMilli() - presentation.StartTime
 		} else {
@@ -181,7 +296,7 @@ func updateClockTimer() {
 				app.QueueUpdateDraw(func() {
 					timerText.SetText(
 						"\n\n\n[red]PAUSED\n[yellow]Total:[white] " + formatDuration(elapsed),
-					)
+						)
 				})
 			} else {
 				app.QueueUpdateDraw(func() {
@@ -207,9 +322,15 @@ func formatTwoDigits(n int) string {
 
 func handleSpacebarSwitch() {
 	saveTime()
+
+	speakers := currentSectionSpeakers()
+	if len(speakers) == 0 {
+		return
+	}
+
 	presentation.CurrentSpeakerIndex++
 
-	if presentation.CurrentSpeakerIndex >= len(presentation.Speakers) {
+	if presentation.CurrentSpeakerIndex >= len(speakers) {
 		presentation.CurrentSpeakerIndex = 0
 		presentation.CurrentSectionIndex++
 	}
@@ -222,7 +343,10 @@ func handleSpacebarSwitch() {
 
 func saveTime() {
 	timeAdded := time.Now().UnixMilli() - lastTimeChange
-	currSpeaker := presentation.Speakers[presentation.CurrentSpeakerIndex].Name
+	currSpeaker := currentSpeakerName()
+	if currSpeaker == "" {
+		return
+	}
 	currSection := &presentation.Sections[presentation.CurrentSectionIndex]
 
 	currSection.SpeakerSplits[currSpeaker] += TotalTimeMs(timeAdded)
